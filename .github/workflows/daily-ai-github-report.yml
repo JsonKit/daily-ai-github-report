@@ -1,0 +1,40 @@
+name: Daily AI GitHub Report
+
+on:
+  schedule:
+    # 08:00 Asia/Shanghai.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest tests/test_daily_ai_github_report.py
+
+      - name: Send report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ARK_ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ARK_ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ARK_ANTHROPIC_BASE_URL }}
+          ANTHROPIC_MODEL: ${{ secrets.ARK_ANTHROPIC_MODEL }}
+          ANTHROPIC_VERSION: ${{ secrets.ARK_ANTHROPIC_VERSION || '2023-06-01' }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          REPORT_REPO_LIMIT: ${{ vars.REPORT_REPO_LIMIT || '8' }}
+        run: python scripts/daily_ai_github_report.py
