@@ -2,8 +2,8 @@ name: Daily AI GitHub Report
 
 on:
   schedule:
-    # 08:00 Asia/Shanghai.
-    - cron: "0 0 * * *"
+    # 09:00 Asia/Shanghai.
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 permissions:

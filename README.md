@@ -1,6 +1,6 @@
 # GitHub AI 热门项目日报
 
-每天 08:00（北京时间）通过 GitHub Actions 抓取 GitHub 上最近创建并较热门的 AI 相关项目，调用火山方舟 Claude / Anthropic 兼容接口生成中文摘要，然后发送到飞书群机器人。
+每天 09:00（北京时间）通过 GitHub Actions 抓取 GitHub 上最近创建并较热门的 AI 相关项目，调用火山方舟 Claude / Anthropic 兼容接口生成中文摘要，然后发送到飞书群机器人。
 
 ## 部署
 
