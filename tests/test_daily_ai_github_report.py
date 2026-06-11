@@ -3,11 +3,14 @@ import unittest
 from datetime import date
 
 from scripts.daily_ai_github_report import (
+    AI_KEYWORDS,
+    EXCLUDED_SEARCH_TERMS,
     GitHubRepo,
     build_anthropic_headers,
     build_anthropic_payload,
     build_anthropic_messages_url,
     build_feishu_payload,
+    build_github_search_query,
     extract_json_object,
     parse_github_repo,
     rank_repositories,
@@ -15,6 +18,26 @@ from scripts.daily_ai_github_report import (
 
 
 class DailyAiGitHubReportTests(unittest.TestCase):
+    def test_search_keywords_focus_on_ready_to_use_ai_tools(self):
+        self.assertIn("mcp", AI_KEYWORDS)
+        self.assertIn("claude-code", AI_KEYWORDS)
+        self.assertIn("codex", AI_KEYWORDS)
+        self.assertIn("plugin", AI_KEYWORDS)
+        self.assertIn("skill", AI_KEYWORDS)
+        self.assertNotIn("llm", AI_KEYWORDS)
+        self.assertNotIn("machine-learning", AI_KEYWORDS)
+        self.assertNotIn("deep-learning", AI_KEYWORDS)
+        self.assertNotIn("generative-ai", AI_KEYWORDS)
+
+    def test_build_github_search_query_excludes_learning_content(self):
+        query = build_github_search_query("mcp", "2026-06-01")
+
+        self.assertIn("mcp", query)
+        self.assertIn("created:>=2026-06-01", query)
+        self.assertIn("stars:>20", query)
+        for excluded in EXCLUDED_SEARCH_TERMS:
+            self.assertIn(f"-{excluded}", query)
+
     def test_parse_github_repo_normalizes_api_response(self):
         payload = {
             "full_name": "owner/project",

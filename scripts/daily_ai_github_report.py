@@ -21,14 +21,33 @@ from typing import Any
 
 GITHUB_API = "https://api.github.com"
 AI_KEYWORDS = (
-    "artificial-intelligence",
-    "llm",
-    "ai-agent",
-    "rag",
-    "machine-learning",
-    "deep-learning",
-    "generative-ai",
     "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "agent",
+    "claude-code",
+    "codex",
+    "plugin",
+    "plugins",
+    "skill",
+    "skills",
+    "automation",
+    "developer-tools",
+    "cli",
+    "vscode-extension",
+    "cursor",
+)
+
+EXCLUDED_SEARCH_TERMS = (
+    "course",
+    "tutorial",
+    "awesome",
+    "paper",
+    "papers",
+    "dataset",
+    "benchmark",
+    "study",
+    "learning",
 )
 
 
@@ -135,6 +154,11 @@ def rank_repositories(
     )[:limit]
 
 
+def build_github_search_query(keyword: str, since: str) -> str:
+    exclusions = " ".join(f"-{term}" for term in EXCLUDED_SEARCH_TERMS)
+    return f"{keyword} created:>={since} stars:>20 {exclusions}"
+
+
 def search_github_repositories(token: str, per_keyword: int = 6) -> list[GitHubRepo]:
     since = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
     headers = {"Accept": "application/vnd.github+json"}
@@ -143,7 +167,7 @@ def search_github_repositories(token: str, per_keyword: int = 6) -> list[GitHubR
 
     repos: list[GitHubRepo] = []
     for keyword in AI_KEYWORDS:
-        query = f"{keyword} created:>={since} stars:>20"
+        query = build_github_search_query(keyword, since)
         params = urllib.parse.urlencode(
             {
                 "q": query,
