@@ -2,7 +2,7 @@
 
 每天 09:00（北京时间）通过 GitHub Actions 抓取 GitHub 上最近创建并较热门的 AI 应用工具项目，调用火山方舟 Claude / Anthropic 兼容接口生成中文摘要，然后发送到飞书群机器人。
 
-项目重点关注 MCP、Agent、插件、Skill、Claude Code、Codex、CLI、编辑器扩展等开箱即用工具；搜索时会排除课程、教程、论文、数据集、benchmark 等学习或研究类内容。
+项目重点关注 MCP、Agent、插件、Skill、Claude Code、Codex、CLI、编辑器扩展等开箱即用工具。搜索会先查最近创建且较热门的项目，如果没有候选项目，会自动扩大时间和活跃度范围兜底。
 
 ## 部署
 

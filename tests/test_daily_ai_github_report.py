@@ -1,10 +1,10 @@
 import json
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from scripts.daily_ai_github_report import (
     AI_KEYWORDS,
-    EXCLUDED_SEARCH_TERMS,
     GitHubRepo,
     build_anthropic_headers,
     build_anthropic_payload,
@@ -12,6 +12,7 @@ from scripts.daily_ai_github_report import (
     build_feishu_payload,
     build_github_search_query,
     extract_json_object,
+    main,
     parse_github_repo,
     rank_repositories,
 )
@@ -29,14 +30,30 @@ class DailyAiGitHubReportTests(unittest.TestCase):
         self.assertNotIn("deep-learning", AI_KEYWORDS)
         self.assertNotIn("generative-ai", AI_KEYWORDS)
 
-    def test_build_github_search_query_excludes_learning_content(self):
-        query = build_github_search_query("mcp", "2026-06-01")
+    def test_build_github_search_query_uses_ready_to_use_tool_terms_without_exclusions(self):
+        query = build_github_search_query(
+            "mcp",
+            created_since="2026-06-01",
+            min_stars=20,
+        )
 
         self.assertIn("mcp", query)
         self.assertIn("created:>=2026-06-01", query)
         self.assertIn("stars:>20", query)
-        for excluded in EXCLUDED_SEARCH_TERMS:
-            self.assertIn(f"-{excluded}", query)
+        self.assertNotIn("-tutorial", query)
+        self.assertNotIn("-paper", query)
+
+    def test_build_github_search_query_supports_recently_pushed_fallback(self):
+        query = build_github_search_query(
+            "mcp",
+            pushed_since="2026-06-01",
+            min_stars=50,
+        )
+
+        self.assertIn("mcp", query)
+        self.assertIn("pushed:>=2026-06-01", query)
+        self.assertIn("stars:>50", query)
+        self.assertNotIn("created:", query)
 
     def test_parse_github_repo_normalizes_api_response(self):
         payload = {
@@ -155,6 +172,19 @@ class DailyAiGitHubReportTests(unittest.TestCase):
         self.assertIn("sign", payload)
         self.assertEqual(payload["sign"], "/1VVdZH3KitTHu9FiYl+TZ0EGq/rppGGi7XFsB5aJSA=")
         self.assertEqual(json.loads(json.dumps(payload))["content"]["text"], "hello")
+
+    def test_main_sends_notice_when_no_repositories_are_found(self):
+        sent_messages = []
+
+        with (
+            patch("scripts.daily_ai_github_report.search_github_repositories", return_value=[]),
+            patch("scripts.daily_ai_github_report.send_feishu_message", side_effect=sent_messages.append),
+        ):
+            result = main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("今日未发现符合条件的 AI 应用工具项目", sent_messages[0])
 
 
 if __name__ == "__main__":

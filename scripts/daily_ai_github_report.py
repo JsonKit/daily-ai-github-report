@@ -38,19 +38,6 @@ AI_KEYWORDS = (
     "cursor",
 )
 
-EXCLUDED_SEARCH_TERMS = (
-    "course",
-    "tutorial",
-    "awesome",
-    "paper",
-    "papers",
-    "dataset",
-    "benchmark",
-    "study",
-    "learning",
-)
-
-
 @dataclasses.dataclass(frozen=True)
 class GitHubRepo:
     full_name: str
@@ -63,6 +50,21 @@ class GitHubRepo:
     pushed_at: str
     topics: list[str]
     readme_excerpt: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubSearchRound:
+    name: str
+    created_days: int | None = None
+    pushed_days: int | None = None
+    min_stars: int = 20
+
+
+SEARCH_ROUNDS = (
+    GitHubSearchRound(name="recent-created", created_days=14, min_stars=20),
+    GitHubSearchRound(name="wider-created", created_days=30, min_stars=10),
+    GitHubSearchRound(name="recently-pushed", pushed_days=14, min_stars=50),
+)
 
 
 def env(name: str, default: str | None = None, required: bool = False) -> str:
@@ -154,32 +156,64 @@ def rank_repositories(
     )[:limit]
 
 
-def build_github_search_query(keyword: str, since: str) -> str:
-    exclusions = " ".join(f"-{term}" for term in EXCLUDED_SEARCH_TERMS)
-    return f"{keyword} created:>={since} stars:>20 {exclusions}"
+def build_github_search_query(
+    keyword: str,
+    *,
+    created_since: str | None = None,
+    pushed_since: str | None = None,
+    min_stars: int = 20,
+) -> str:
+    date_filter = ""
+    if created_since:
+        date_filter = f"created:>={created_since}"
+    elif pushed_since:
+        date_filter = f"pushed:>={pushed_since}"
+    else:
+        raise ValueError("created_since or pushed_since is required")
+    return f"{keyword} {date_filter} stars:>{min_stars}"
 
 
 def search_github_repositories(token: str, per_keyword: int = 6) -> list[GitHubRepo]:
-    since = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    repos: list[GitHubRepo] = []
-    for keyword in AI_KEYWORDS:
-        query = build_github_search_query(keyword, since)
-        params = urllib.parse.urlencode(
-            {
-                "q": query,
-                "sort": "stars",
-                "order": "desc",
-                "per_page": str(per_keyword),
-            }
+    for search_round in SEARCH_ROUNDS:
+        repos: list[GitHubRepo] = []
+        created_since = (
+            (datetime.now(timezone.utc) - timedelta(days=search_round.created_days)).date().isoformat()
+            if search_round.created_days is not None
+            else None
         )
-        result = http_json(f"{GITHUB_API}/search/repositories?{params}", headers=headers)
-        repos.extend(parse_github_repo(item) for item in result.get("items", []))
-        time.sleep(0.8)
-    return repos
+        pushed_since = (
+            (datetime.now(timezone.utc) - timedelta(days=search_round.pushed_days)).date().isoformat()
+            if search_round.pushed_days is not None
+            else None
+        )
+        for keyword in AI_KEYWORDS:
+            query = build_github_search_query(
+                keyword,
+                created_since=created_since,
+                pushed_since=pushed_since,
+                min_stars=search_round.min_stars,
+            )
+            params = urllib.parse.urlencode(
+                {
+                    "q": query,
+                    "sort": "stars",
+                    "order": "desc",
+                    "per_page": str(per_keyword),
+                }
+            )
+            result = http_json(f"{GITHUB_API}/search/repositories?{params}", headers=headers)
+            items = result.get("items", [])
+            print(f"GitHub search round={search_round.name} keyword={keyword} count={len(items)}")
+            repos.extend(parse_github_repo(item) for item in items)
+            time.sleep(0.8)
+        if repos:
+            print(f"GitHub search round={search_round.name} selected with {len(repos)} raw repositories.")
+            return repos
+    return []
 
 
 def fetch_readme_excerpt(repo: GitHubRepo, token: str, max_chars: int = 4500) -> str:
@@ -354,7 +388,9 @@ def main() -> int:
     repos = search_github_repositories(github_token)
     ranked = rank_repositories(repos, limit=limit)
     if not ranked:
-        raise RuntimeError("No repositories found from GitHub search")
+        send_feishu_message(f"GitHub AI 热门项目日报｜{report_date}\n\n今日未发现符合条件的 AI 应用工具项目。")
+        print("No repositories found from GitHub search; sent empty-result notice.")
+        return 0
 
     enriched = enrich_with_readmes(ranked, github_token)
     try:
