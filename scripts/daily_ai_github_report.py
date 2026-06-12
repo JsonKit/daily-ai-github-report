@@ -21,21 +21,33 @@ from typing import Any
 
 GITHUB_API = "https://api.github.com"
 AI_KEYWORDS = (
+    # AI 协议与 Agent
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "ai-agent",
     "agent",
-    "claude-code",
+    "agentic",
+    "ai-workflow",
+    "loop engineering",
+    # AI 编码工具
+    "claude code",
     "codex",
-    "plugin",
-    "plugins",
-    "skill",
-    "skills",
-    "automation",
-    "developer-tools",
-    "cli",
-    "vscode-extension",
     "cursor",
+    "kiro",
+    # AI 工具扩展
+    "ai-plugin",
+    "ai-skill",
+    "agent-plugin",
+    "agent-skill",
+    # Swift / iOS
+    "swift",
+    "ios",
+    # Flutter
+    "flutter",
+    # Mac 工具
+    "macos-tool",
+    "mac-utility",
 )
 
 @dataclasses.dataclass(frozen=True)
