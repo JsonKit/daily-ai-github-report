@@ -421,7 +421,7 @@ def build_fallback_report(repos: list[GitHubRepo], report_date: str) -> str:
 def main() -> int:
     github_token = env("GH_TOKEN", env("GITHUB_TOKEN", ""))
     report_date = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
-    limit = int(env("REPORT_REPO_LIMIT", "8"))
+    limit = int(env("REPORT_REPO_LIMIT", "10"))
 
     repos = search_github_repositories(github_token)
     ranked = rank_repositories(repos, limit=limit)
