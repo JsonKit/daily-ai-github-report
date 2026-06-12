@@ -80,9 +80,9 @@ class GitHubSearchRound:
 
 
 SEARCH_ROUNDS = (
-    GitHubSearchRound(name="recent-created", created_days=14, min_stars=20),
-    GitHubSearchRound(name="wider-created", created_days=30, min_stars=10),
-    GitHubSearchRound(name="recently-pushed", pushed_days=14, min_stars=50),
+    GitHubSearchRound(name="recent-created", created_days=14, min_stars=200),
+    GitHubSearchRound(name="wider-created", created_days=30, min_stars=100),
+    GitHubSearchRound(name="recently-pushed", pushed_days=14, min_stars=200),
 )
 
 
