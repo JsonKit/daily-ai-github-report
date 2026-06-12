@@ -9,11 +9,9 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -74,10 +72,9 @@ class TrendingParser(HTMLParser):
             self._capture_field = "desc"
             self._text_buf = []
 
-        if tag == "span" and "d-inline-block" in cls and "itemprop" in attr_dict:
-            if attr_dict.get("itemprop") == "programmingLanguage":
-                self._capture_field = "lang"
-                self._text_buf = []
+        if tag == "span" and attr_dict.get("itemprop") == "programmingLanguage":
+            self._capture_field = "lang"
+            self._text_buf = []
 
         if tag == "a" and "Link--muted" in cls and "stargazers" in (attr_dict.get("href") or ""):
             self._capture_field = "stars"
