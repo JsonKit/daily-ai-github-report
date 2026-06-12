@@ -1,8 +1,15 @@
-# GitHub AI 热门项目日报
+# GitHub 热门项目周报
 
-每天 09:00（北京时间）通过 GitHub Actions 抓取 GitHub 上最近创建并较热门的 AI 应用工具项目，调用火山方舟 Claude / Anthropic 兼容接口生成中文摘要，然后发送到飞书群机器人。
+每周一 09:00（北京时间）通过 GitHub Actions 抓取 GitHub Trending（weekly）热门项目，调用 AI 根据用户兴趣偏好筛选并生成中文摘要，然后发送到飞书群机器人。
 
-项目重点关注 MCP、Agent、插件、Skill、Claude Code、Codex、CLI、编辑器扩展等开箱即用工具。搜索会先查最近创建且较热门的项目，如果没有候选项目，会自动扩大时间和活跃度范围兜底。
+用户兴趣方向：MCP、Agent、AI 编码工具（Claude Code / Codex / Cursor / Kiro）、Agent Skills/Plugin、Swift/iOS、Flutter、macOS 开源工具等。
+
+## 工作流程
+
+1. 抓取 `github.com/trending?since=weekly` 获取本周全语言热门项目
+2. 将完整列表 + 用户兴趣关键词传给 AI
+3. AI 筛选 10 个最匹配的项目并生成结构化周报
+4. 推送到飞书群
 
 ## 部署
 
@@ -27,11 +34,11 @@ FEISHU_WEBHOOK_SECRET
 https://ark.cn-beijing.volces.com/api/coding
 ```
 
-配置完成后进入 `Actions -> Daily AI GitHub Report -> Run workflow` 手动运行一次验证。
+配置完成后进入 `Actions -> Weekly AI GitHub Report -> Run workflow` 手动运行一次验证。
 
 ## 本地验证
 
 ```bash
 python3 -m unittest tests/test_daily_ai_github_report.py
-python3 -m py_compile scripts/daily_ai_github_report.py tests/test_daily_ai_github_report.py
+python3 -m py_compile scripts/daily_ai_github_report.py
 ```

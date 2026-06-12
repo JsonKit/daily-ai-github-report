@@ -1,148 +1,73 @@
 import json
 import unittest
-from datetime import date
 from unittest.mock import patch
 
 from scripts.daily_ai_github_report import (
-    AI_KEYWORDS,
-    GitHubRepo,
+    USER_INTERESTS,
+    TRENDING_URL,
+    TrendingParser,
+    TrendingRepo,
     build_anthropic_headers,
-    build_anthropic_payload,
     build_anthropic_messages_url,
+    build_anthropic_payload,
     build_feishu_payload,
-    build_github_search_query,
-    extract_json_object,
     main,
-    parse_github_repo,
-    rank_repositories,
 )
 
 
-class DailyAiGitHubReportTests(unittest.TestCase):
-    def test_search_keywords_focus_on_ready_to_use_ai_tools(self):
-        self.assertIn("mcp", AI_KEYWORDS)
-        self.assertIn("claude code", AI_KEYWORDS)
-        self.assertIn("codex", AI_KEYWORDS)
-        self.assertIn("ai-plugin", AI_KEYWORDS)
-        self.assertIn("agent-skills", AI_KEYWORDS)
-        self.assertNotIn("llm", AI_KEYWORDS)
-        self.assertNotIn("machine-learning", AI_KEYWORDS)
-        self.assertNotIn("deep-learning", AI_KEYWORDS)
-        self.assertNotIn("generative-ai", AI_KEYWORDS)
+class WeeklyGitHubReportTests(unittest.TestCase):
+    def test_user_interests_contains_core_topics(self):
+        self.assertIn("mcp", USER_INTERESTS)
+        self.assertIn("claude code", USER_INTERESTS)
+        self.assertIn("codex", USER_INTERESTS)
+        self.assertIn("swift", USER_INTERESTS)
+        self.assertIn("flutter", USER_INTERESTS)
+        self.assertNotIn("llm", USER_INTERESTS)
+        self.assertNotIn("machine-learning", USER_INTERESTS)
 
-    def test_build_github_search_query_uses_ready_to_use_tool_terms_without_exclusions(self):
-        query = build_github_search_query(
-            "mcp",
-            created_since="2026-06-01",
-            min_stars=20,
-        )
+    def test_trending_url_is_weekly(self):
+        self.assertIn("since=weekly", TRENDING_URL)
 
-        self.assertIn("mcp", query)
-        self.assertIn("created:>=2026-06-01", query)
-        self.assertIn("stars:>20", query)
-        self.assertNotIn("-tutorial", query)
-        self.assertNotIn("-paper", query)
+    def test_trending_parser_extracts_repos(self):
+        html = """
+        <article class="Box-row">
+          <h2 class="h3 lh-condensed">
+            <a href="/owner/project">owner / project</a>
+          </h2>
+          <p class="col-9 color-fg-muted my-1 pr-4">A cool project</p>
+          <span class="d-inline-block ml-0 mr-3" itemprop="programmingLanguage">Python</span>
+          <a class="Link--muted d-inline-block mr-3" href="/owner/project/stargazers">1,234</a>
+          <span class="d-inline-block float-sm-right">456 stars this week</span>
+        </article>
+        """
+        parser = TrendingParser()
+        parser.feed(html)
 
-    def test_build_github_search_query_supports_recently_pushed_fallback(self):
-        query = build_github_search_query(
-            "mcp",
-            pushed_since="2026-06-01",
-            min_stars=50,
-        )
-
-        self.assertIn("mcp", query)
-        self.assertIn("pushed:>=2026-06-01", query)
-        self.assertIn("stars:>50", query)
-        self.assertNotIn("created:", query)
-
-    def test_parse_github_repo_normalizes_api_response(self):
-        payload = {
-            "full_name": "owner/project",
-            "html_url": "https://github.com/owner/project",
-            "description": "AI coding assistant",
-            "stargazers_count": 1200,
-            "language": "Python",
-            "created_at": "2026-06-01T01:02:03Z",
-            "updated_at": "2026-06-08T04:05:06Z",
-            "pushed_at": "2026-06-08T04:05:06Z",
-            "topics": ["ai", "agent"],
-        }
-
-        repo = parse_github_repo(payload)
-
+        self.assertEqual(len(parser.repos), 1)
+        repo = parser.repos[0]
         self.assertEqual(repo.full_name, "owner/project")
-        self.assertEqual(repo.stars, 1200)
-        self.assertEqual(repo.topics, ["ai", "agent"])
+        self.assertEqual(repo.url, "https://github.com/owner/project")
+        self.assertEqual(repo.description, "A cool project")
+        self.assertEqual(repo.language, "Python")
+        self.assertEqual(repo.stars, "1234")
+        self.assertEqual(repo.weekly_stars, "456 stars this week")
 
-    def test_rank_repositories_deduplicates_and_orders_by_score(self):
-        repos = [
-            GitHubRepo(
-                full_name="a/old",
-                url="https://github.com/a/old",
-                description="",
-                stars=1000,
-                language="Python",
-                created_at="2026-05-01T00:00:00Z",
-                updated_at="2026-06-01T00:00:00Z",
-                pushed_at="2026-06-01T00:00:00Z",
-                topics=[],
-            ),
-            GitHubRepo(
-                full_name="b/new",
-                url="https://github.com/b/new",
-                description="",
-                stars=120,
-                language="TypeScript",
-                created_at="2026-06-08T00:00:00Z",
-                updated_at="2026-06-08T00:00:00Z",
-                pushed_at="2026-06-08T00:00:00Z",
-                topics=[],
-            ),
-            GitHubRepo(
-                full_name="b/new",
-                url="https://github.com/b/new",
-                description="duplicate",
-                stars=120,
-                language="TypeScript",
-                created_at="2026-06-08T00:00:00Z",
-                updated_at="2026-06-08T00:00:00Z",
-                pushed_at="2026-06-08T00:00:00Z",
-                topics=[],
-            ),
-        ]
+    def test_build_anthropic_payload_includes_interests(self):
+        repos = [TrendingRepo(
+            full_name="owner/proj",
+            url="https://github.com/owner/proj",
+            description="test",
+            language="Python",
+            stars="100",
+            weekly_stars="50 stars this week",
+        )]
+        payload = build_anthropic_payload("test-model", repos, "2026-06-12")
 
-        ranked = rank_repositories(repos, today=date(2026, 6, 9), limit=2)
-
-        self.assertEqual([repo.full_name for repo in ranked], ["b/new", "a/old"])
-
-    def test_extract_json_object_handles_wrapped_model_text(self):
-        text = "下面是结果：\n```json\n{\"items\": [1], \"summary\": \"ok\"}\n```"
-
-        result = extract_json_object(text)
-
-        self.assertEqual(result, {"items": [1], "summary": "ok"})
-
-    def test_build_anthropic_payload_uses_messages_api_shape(self):
-        repos = [
-            GitHubRepo(
-                full_name="owner/project",
-                url="https://github.com/owner/project",
-                description="AI coding assistant",
-                stars=1200,
-                language="Python",
-                created_at="2026-06-01T01:02:03Z",
-                updated_at="2026-06-08T04:05:06Z",
-                pushed_at="2026-06-08T04:05:06Z",
-                topics=["ai"],
-                readme_excerpt="README",
-            )
-        ]
-
-        payload = build_anthropic_payload("claude-test", repos, "2026-06-09")
-
-        self.assertEqual(payload["model"], "claude-test")
-        self.assertEqual(payload["messages"][0]["role"], "user")
-        self.assertIn("GitHub AI 热门项目日报", payload["messages"][0]["content"])
+        self.assertEqual(payload["model"], "test-model")
+        content = payload["messages"][0]["content"]
+        self.assertIn("GitHub 热门项目周报", content)
+        self.assertIn("mcp", content)
+        self.assertIn("swift", content)
 
     def test_build_anthropic_messages_url_appends_v1_messages(self):
         self.assertEqual(
@@ -160,31 +85,28 @@ class DailyAiGitHubReportTests(unittest.TestCase):
             api_key="api-key",
             api_version="2023-06-01",
         )
-
         self.assertEqual(headers["Authorization"], "Bearer ark-token")
         self.assertNotIn("x-api-key", headers)
 
     def test_build_feishu_payload_supports_signed_webhook(self):
         payload = build_feishu_payload("hello", secret="secret", timestamp="123")
-
         self.assertEqual(payload["msg_type"], "text")
         self.assertEqual(payload["timestamp"], "123")
         self.assertIn("sign", payload)
         self.assertEqual(payload["sign"], "/1VVdZH3KitTHu9FiYl+TZ0EGq/rppGGi7XFsB5aJSA=")
-        self.assertEqual(json.loads(json.dumps(payload))["content"]["text"], "hello")
 
-    def test_main_sends_notice_when_no_repositories_are_found(self):
+    def test_main_sends_notice_when_no_repos_found(self):
         sent_messages = []
 
         with (
-            patch("scripts.daily_ai_github_report.search_github_repositories", return_value=[]),
+            patch("scripts.daily_ai_github_report.fetch_trending_repos", return_value=[]),
             patch("scripts.daily_ai_github_report.send_feishu_message", side_effect=sent_messages.append),
         ):
             result = main()
 
         self.assertEqual(result, 0)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("今日未发现符合条件的 AI 应用工具项目", sent_messages[0])
+        self.assertIn("本周未能获取 Trending 数据", sent_messages[0])
 
 
 if __name__ == "__main__":

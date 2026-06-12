@@ -1,9 +1,9 @@
-name: Daily AI GitHub Report
+name: Weekly AI GitHub Report
 
 on:
   schedule:
-    # 09:00 Asia/Shanghai.
-    - cron: "0 1 * * *"
+    # 09:00 Asia/Shanghai every Monday = 01:00 UTC Monday
+    - cron: "0 1 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -36,5 +36,4 @@ jobs:
           ANTHROPIC_VERSION: ${{ secrets.ARK_ANTHROPIC_VERSION || '2023-06-01' }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
-          REPORT_REPO_LIMIT: ${{ vars.REPORT_REPO_LIMIT || '8' }}
         run: python scripts/daily_ai_github_report.py

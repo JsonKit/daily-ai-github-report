@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a daily GitHub AI project report and send it to Feishu."""
+"""Generate a weekly GitHub trending report and send it to Feishu."""
 
 from __future__ import annotations
 
@@ -8,82 +8,125 @@ import dataclasses
 import hashlib
 import hmac
 import json
-import math
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 
-GITHUB_API = "https://api.github.com"
-AI_KEYWORDS = (
-    # AI 协议与 Agent
-    "mcp",
-    "model-context-protocol",
-    "mcp-server",
-    "mcp-client",
-    "ai-agent",
-    "agent",
-    "agentic",
-    "ai-workflow",
-    "agent-harness",
+USER_INTERESTS = (
+    "mcp", "model-context-protocol", "mcp-server", "mcp-client",
+    "ai-agent", "agent", "agentic", "ai-workflow", "agent-harness",
     "loop engineering",
-    # AI 编码工具
-    "claude code",
-    "codex",
-    "cursor",
-    "kiro",
-    "gemini-cli",
-    "ai-coding",
-    "coding-agent",
-    "vibe-coding",
-    "context-engineering",
-    # AI 工具扩展
-    "ai-plugin",
-    "agent-plugin",
-    "agent-skills",
-    # Swift / iOS
-    "swift",
-    "swiftui",
-    "ios",
-    # Flutter
-    "flutter",
-    # Mac 工具
-    "macos-app",
-    "open-source-mac-os-apps",
+    "claude code", "codex", "cursor", "kiro", "gemini-cli",
+    "ai-coding", "coding-agent", "vibe-coding", "context-engineering",
+    "ai-plugin", "agent-plugin", "agent-skills",
+    "swift", "swiftui", "ios", "flutter",
+    "macos-app", "open-source-mac-os-apps",
 )
 
+TRENDING_URL = "https://github.com/trending?since=weekly"
+
+
 @dataclasses.dataclass(frozen=True)
-class GitHubRepo:
+class TrendingRepo:
     full_name: str
     url: str
     description: str
-    stars: int
     language: str
-    created_at: str
-    updated_at: str
-    pushed_at: str
-    topics: list[str]
-    readme_excerpt: str = ""
+    stars: str
+    weekly_stars: str
 
 
-@dataclasses.dataclass(frozen=True)
-class GitHubSearchRound:
-    name: str
-    created_days: int | None = None
-    pushed_days: int | None = None
-    min_stars: int = 20
+class TrendingParser(HTMLParser):
+    """Parse GitHub Trending HTML page to extract repository info."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.repos: list[TrendingRepo] = []
+        self._in_article = False
+        self._current: dict[str, str] = {}
+        self._capture_field: str | None = None
+        self._text_buf: list[str] = []
 
-SEARCH_ROUNDS = (
-    GitHubSearchRound(name="recent-created", created_days=14, min_stars=200),
-    GitHubSearchRound(name="wider-created", created_days=30, min_stars=100),
-    GitHubSearchRound(name="recently-pushed", pushed_days=14, min_stars=200),
-)
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_dict = dict(attrs)
+        cls = attr_dict.get("class", "") or ""
+
+        if tag == "article" and "Box-row" in cls:
+            self._in_article = True
+            self._current = {}
+
+        if not self._in_article:
+            return
+
+        if tag == "h2" and "h3" in cls:
+            self._capture_field = "name"
+            self._text_buf = []
+
+        if tag == "p" and ("col-9" in cls or "color-fg-muted" in cls):
+            self._capture_field = "desc"
+            self._text_buf = []
+
+        if tag == "span" and "d-inline-block" in cls and "itemprop" in attr_dict:
+            if attr_dict.get("itemprop") == "programmingLanguage":
+                self._capture_field = "lang"
+                self._text_buf = []
+
+        if tag == "a" and "Link--muted" in cls and "stargazers" in (attr_dict.get("href") or ""):
+            self._capture_field = "stars"
+            self._text_buf = []
+
+        if tag == "span" and "d-inline-block" in cls and "float-sm-right" in cls:
+            self._capture_field = "weekly_stars"
+            self._text_buf = []
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_field is not None:
+            self._text_buf.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._capture_field == "name" and tag == "h2":
+            text = "".join(self._text_buf).strip()
+            name = "/".join(part.strip() for part in text.split("/") if part.strip())
+            self._current["name"] = name
+            self._capture_field = None
+
+        elif self._capture_field == "desc" and tag == "p":
+            self._current["desc"] = "".join(self._text_buf).strip()
+            self._capture_field = None
+
+        elif self._capture_field == "lang" and tag == "span":
+            self._current["lang"] = "".join(self._text_buf).strip()
+            self._capture_field = None
+
+        elif self._capture_field == "stars" and tag == "a":
+            self._current["stars"] = "".join(self._text_buf).strip().replace(",", "").replace(" ", "")
+            self._capture_field = None
+
+        elif self._capture_field == "weekly_stars" and tag == "span":
+            self._current["weekly_stars"] = "".join(self._text_buf).strip()
+            self._capture_field = None
+
+        if tag == "article" and self._in_article:
+            self._in_article = False
+            name = self._current.get("name", "")
+            if name:
+                self.repos.append(TrendingRepo(
+                    full_name=name,
+                    url=f"https://github.com/{name}",
+                    description=self._current.get("desc", ""),
+                    language=self._current.get("lang", "Unknown"),
+                    stars=self._current.get("stars", "0"),
+                    weekly_stars=self._current.get("weekly_stars", ""),
+                ))
+            self._current = {}
 
 
 def env(name: str, default: str | None = None, required: bool = False) -> str:
@@ -91,6 +134,19 @@ def env(name: str, default: str | None = None, required: bool = False) -> str:
     if required and not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value or ""
+
+
+def http_get(url: str, *, timeout: int = 30) -> str:
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) daily-ai-github-report",
+        "Accept": "text/html",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
 
 
 def http_json(
@@ -112,12 +168,7 @@ def http_json(
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request_headers["Content-Type"] = "application/json"
 
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers=request_headers,
-        method=method,
-    )
+    request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content = response.read().decode("utf-8")
@@ -130,163 +181,51 @@ def http_json(
     return json.loads(content)
 
 
-def parse_github_repo(item: dict[str, Any]) -> GitHubRepo:
-    return GitHubRepo(
-        full_name=str(item.get("full_name") or ""),
-        url=str(item.get("html_url") or ""),
-        description=str(item.get("description") or ""),
-        stars=int(item.get("stargazers_count") or 0),
-        language=str(item.get("language") or "Unknown"),
-        created_at=str(item.get("created_at") or ""),
-        updated_at=str(item.get("updated_at") or ""),
-        pushed_at=str(item.get("pushed_at") or ""),
-        topics=list(item.get("topics") or []),
-    )
+def fetch_trending_repos() -> list[TrendingRepo]:
+    html = http_get(TRENDING_URL)
+    parser = TrendingParser()
+    parser.feed(html)
+    print(f"Fetched {len(parser.repos)} repos from GitHub Trending (weekly).")
+    return parser.repos
 
 
-def parse_date(value: str) -> date:
-    if not value:
-        return date(1970, 1, 1)
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+def build_anthropic_payload(model: str, repos: list[TrendingRepo], report_date: str) -> dict[str, Any]:
+    interests_text = "、".join(USER_INTERESTS)
+    repo_list = [dataclasses.asdict(repo) for repo in repos]
+    prompt = f"""你是一个技术周报编辑。下面是本周 GitHub Trending 的全部热门项目列表。
 
+用户是一名 iOS 开发者（Swift/Flutter），使用 Mac 电脑，日常用 AI 工具（Claude Code、Codex CLI、Kiro CLI、Cursor）进行开发，对以下方向感兴趣：
+{interests_text}
 
-def repo_score(repo: GitHubRepo, today: date) -> float:
-    created_days = max((today - parse_date(repo.created_at)).days, 0)
-    pushed_days = max((today - parse_date(repo.pushed_at)).days, 0)
-    recency_bonus = max(0, 30 - created_days) * 12 + max(0, 14 - pushed_days) * 4
-    return math.log10(repo.stars + 1) * 100 + recency_bonus
-
-
-def rank_repositories(
-    repos: list[GitHubRepo],
-    *,
-    today: date | None = None,
-    limit: int = 8,
-) -> list[GitHubRepo]:
-    today = today or datetime.now(timezone.utc).date()
-    deduped: dict[str, GitHubRepo] = {}
-    for repo in repos:
-        if repo.full_name and repo.full_name not in deduped:
-            deduped[repo.full_name] = repo
-    return sorted(
-        deduped.values(),
-        key=lambda repo: repo_score(repo, today),
-        reverse=True,
-    )[:limit]
-
-
-def build_github_search_query(
-    keyword: str,
-    *,
-    created_since: str | None = None,
-    pushed_since: str | None = None,
-    min_stars: int = 20,
-) -> str:
-    date_filter = ""
-    if created_since:
-        date_filter = f"created:>={created_since}"
-    elif pushed_since:
-        date_filter = f"pushed:>={pushed_since}"
-    else:
-        raise ValueError("created_since or pushed_since is required")
-    return f"{keyword} {date_filter} stars:>{min_stars}"
-
-
-def search_github_repositories(token: str, per_keyword: int = 6) -> list[GitHubRepo]:
-    headers = {"Accept": "application/vnd.github+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    for search_round in SEARCH_ROUNDS:
-        repos: list[GitHubRepo] = []
-        created_since = (
-            (datetime.now(timezone.utc) - timedelta(days=search_round.created_days)).date().isoformat()
-            if search_round.created_days is not None
-            else None
-        )
-        pushed_since = (
-            (datetime.now(timezone.utc) - timedelta(days=search_round.pushed_days)).date().isoformat()
-            if search_round.pushed_days is not None
-            else None
-        )
-        for keyword in AI_KEYWORDS:
-            query = build_github_search_query(
-                keyword,
-                created_since=created_since,
-                pushed_since=pushed_since,
-                min_stars=search_round.min_stars,
-            )
-            params = urllib.parse.urlencode(
-                {
-                    "q": query,
-                    "sort": "stars",
-                    "order": "desc",
-                    "per_page": str(per_keyword),
-                }
-            )
-            result = http_json(f"{GITHUB_API}/search/repositories?{params}", headers=headers)
-            items = result.get("items", [])
-            print(f"GitHub search round={search_round.name} keyword={keyword} count={len(items)}")
-            repos.extend(parse_github_repo(item) for item in items)
-            time.sleep(0.8)
-        if repos:
-            print(f"GitHub search round={search_round.name} selected with {len(repos)} raw repositories.")
-            return repos
-    return []
-
-
-def fetch_readme_excerpt(repo: GitHubRepo, token: str, max_chars: int = 4500) -> str:
-    headers = {"Accept": "application/vnd.github.raw"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    url = f"{GITHUB_API}/repos/{repo.full_name}/readme"
-    request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            text = response.read().decode("utf-8", errors="replace")
-    except Exception:
-        return ""
-    return text[:max_chars]
-
-
-def enrich_with_readmes(repos: list[GitHubRepo], token: str) -> list[GitHubRepo]:
-    enriched = []
-    for repo in repos:
-        enriched.append(dataclasses.replace(repo, readme_excerpt=fetch_readme_excerpt(repo, token)))
-        time.sleep(0.5)
-    return enriched
-
-
-def build_anthropic_payload(model: str, repos: list[GitHubRepo], report_date: str) -> dict[str, Any]:
-    repo_payload = [dataclasses.asdict(repo) for repo in repos]
-    prompt = f"""请生成一份中文「GitHub AI 热门项目日报」。
+请你从候选列表中筛选出 10 个最匹配用户兴趣的项目，生成一份中文「GitHub 热门项目周报」。
 
 日期：{report_date}
 
 输出格式要求（严格遵循）：
 
-第一行：GitHub AI 热门项目日报 | {report_date}
+第一行：GitHub 热门项目周报 | {report_date}
 空一行后：
-📈 今日趋势总览：2-3 句话总结今日项目趋势方向。
+📈 本周趋势总览：2-3 句话总结本周项目趋势方向。
 
-然后逐个列出全部候选项目，每个项目格式如下：
+然后逐个列出筛选出的项目，每个项目格式如下：
 
 序号. 作者/项目名
 🔗 项目链接
-⭐ Stars 数 | 语言：主要语言
+⭐ Stars 数 | 本周新增：周增长数 | 语言：主要语言
 💡 一句话定位：用一句话说明项目做什么。
 👀 看点：2-4 句话说明核心亮点、技术特色、使用方式。
 🎯 适合人群：说明目标用户群体。
 
 规则：
-1. 挑选全部候选项目，不要遗漏。
-2. 不要编造 README 中没有依据的能力。
-3. 输出为适合飞书机器人发送的纯文本，不要 Markdown 表格或代码块。
-4. 项目之间空一行分隔。
-5. 控制在 3500 字以内。
+1. 从候选列表中精选 10 个与用户兴趣最相关的项目，优先选择与 AI 工具、MCP、Agent、编码辅助、iOS/Swift/Flutter、macOS 工具相关的项目。
+2. 如果高度相关的不足 10 个，可以补充一些泛开发者工具类的优质项目。
+3. 不要编造项目描述中没有提及的能力。
+4. 输出为适合飞书机器人发送的纯文本，不要 Markdown 表格或代码块。
+5. 项目之间空一行分隔。
+6. 控制在 3500 字以内。
 
 候选项目 JSON：
-{json.dumps(repo_payload, ensure_ascii=False)}
+{json.dumps(repo_list, ensure_ascii=False)}
 """
     return {
         "model": model,
@@ -321,7 +260,7 @@ def build_anthropic_headers(
     return headers
 
 
-def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str, retries: int = 2) -> str:
+def call_anthropic_compatible_api(repos: list[TrendingRepo], report_date: str, retries: int = 2) -> str:
     base_url = env("ANTHROPIC_BASE_URL", required=True).rstrip("/")
     auth_token = env("ANTHROPIC_AUTH_TOKEN")
     api_key = env("ANTHROPIC_API_KEY")
@@ -329,11 +268,7 @@ def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str, ret
     api_version = env("ANTHROPIC_VERSION", "2023-06-01")
     url = build_anthropic_messages_url(base_url)
     payload = build_anthropic_payload(model, repos, report_date)
-    headers = build_anthropic_headers(
-        auth_token=auth_token,
-        api_key=api_key,
-        api_version=api_version,
-    )
+    headers = build_anthropic_headers(auth_token=auth_token, api_key=api_key, api_version=api_version)
     last_exc: Exception = RuntimeError("No attempts made")
     for attempt in range(retries):
         try:
@@ -352,22 +287,6 @@ def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str, ret
             if attempt < retries - 1:
                 time.sleep(5)
     raise last_exc
-
-
-def extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("No JSON object found in text")
-    return json.loads(stripped[start : end + 1])
 
 
 def build_feishu_payload(
@@ -403,42 +322,36 @@ def send_feishu_message(text: str) -> None:
         raise RuntimeError(f"Feishu webhook failed: {result}")
 
 
-def build_fallback_report(repos: list[GitHubRepo], report_date: str) -> str:
-    lines = [f"GitHub AI 热门项目日报｜{report_date}", "", "模型摘要失败，以下是候选项目清单："]
-    for index, repo in enumerate(repos, 1):
-        lines.extend(
-            [
-                "",
-                f"{index}. {repo.full_name}",
-                f"Stars: {repo.stars} | Language: {repo.language}",
-                repo.url,
-                repo.description or "暂无描述",
-            ]
-        )
+def build_fallback_report(repos: list[TrendingRepo], report_date: str) -> str:
+    lines = [f"GitHub 热门项目周报｜{report_date}", "", "模型摘要失败，以下是本周 Trending 项目清单："]
+    for index, repo in enumerate(repos[:20], 1):
+        lines.extend([
+            "",
+            f"{index}. {repo.full_name}",
+            f"⭐ {repo.stars} | 本周：{repo.weekly_stars} | {repo.language}",
+            repo.url,
+            repo.description or "暂无描述",
+        ])
     return "\n".join(lines)
 
 
 def main() -> int:
-    github_token = env("GH_TOKEN", env("GITHUB_TOKEN", ""))
     report_date = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
-    limit = int(env("REPORT_REPO_LIMIT", "10"))
 
-    repos = search_github_repositories(github_token)
-    ranked = rank_repositories(repos, limit=limit)
-    if not ranked:
-        send_feishu_message(f"GitHub AI 热门项目日报｜{report_date}\n\n今日未发现符合条件的 AI 应用工具项目。")
-        print("No repositories found from GitHub search; sent empty-result notice.")
+    repos = fetch_trending_repos()
+    if not repos:
+        send_feishu_message(f"GitHub 热门项目周报｜{report_date}\n\n本周未能获取 Trending 数据。")
+        print("No repositories found from GitHub Trending; sent empty-result notice.")
         return 0
 
-    enriched = enrich_with_readmes(ranked, github_token)
     try:
-        report = call_anthropic_compatible_api(enriched, report_date)
+        report = call_anthropic_compatible_api(repos, report_date)
     except Exception as exc:
         print(f"AI summary failed, sending fallback report: {exc}", file=sys.stderr)
-        report = build_fallback_report(enriched, report_date)
+        report = build_fallback_report(repos, report_date)
 
     send_feishu_message(report)
-    print(f"Sent GitHub AI report with {len(enriched)} repositories.")
+    print(f"Sent weekly report based on {len(repos)} trending repositories.")
     return 0
 
 
