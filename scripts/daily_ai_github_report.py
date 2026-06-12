@@ -287,7 +287,7 @@ def build_anthropic_headers(
     return headers
 
 
-def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str) -> str:
+def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str, retries: int = 2) -> str:
     base_url = env("ANTHROPIC_BASE_URL", required=True).rstrip("/")
     auth_token = env("ANTHROPIC_AUTH_TOKEN")
     api_key = env("ANTHROPIC_API_KEY")
@@ -295,25 +295,29 @@ def call_anthropic_compatible_api(repos: list[GitHubRepo], report_date: str) -> 
     api_version = env("ANTHROPIC_VERSION", "2023-06-01")
     url = build_anthropic_messages_url(base_url)
     payload = build_anthropic_payload(model, repos, report_date)
-    result = http_json(
-        url,
-        method="POST",
-        headers=build_anthropic_headers(
-            auth_token=auth_token,
-            api_key=api_key,
-            api_version=api_version,
-        ),
-        body=payload,
-        timeout=90,
+    headers = build_anthropic_headers(
+        auth_token=auth_token,
+        api_key=api_key,
+        api_version=api_version,
     )
-    parts = []
-    for block in result.get("content", []):
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text") or ""))
-    text = "\n".join(parts).strip()
-    if not text:
-        raise RuntimeError(f"Anthropic compatible API returned empty text: {result}")
-    return text
+    last_exc: Exception = RuntimeError("No attempts made")
+    for attempt in range(retries):
+        try:
+            result = http_json(url, method="POST", headers=headers, body=payload, timeout=180)
+            parts = []
+            for block in result.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text") or ""))
+            text = "\n".join(parts).strip()
+            if not text:
+                raise RuntimeError(f"Anthropic compatible API returned empty text: {result}")
+            return text
+        except Exception as exc:
+            last_exc = exc
+            print(f"Anthropic API attempt {attempt + 1}/{retries} failed: {exc}", file=sys.stderr)
+            if attempt < retries - 1:
+                time.sleep(5)
+    raise last_exc
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
