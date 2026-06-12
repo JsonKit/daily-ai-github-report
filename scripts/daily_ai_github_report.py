@@ -25,29 +25,36 @@ AI_KEYWORDS = (
     "mcp",
     "model-context-protocol",
     "mcp-server",
+    "mcp-client",
     "ai-agent",
     "agent",
     "agentic",
     "ai-workflow",
+    "agent-harness",
     "loop engineering",
     # AI 编码工具
     "claude code",
     "codex",
     "cursor",
     "kiro",
+    "gemini-cli",
+    "ai-coding",
+    "coding-agent",
+    "vibe-coding",
+    "context-engineering",
     # AI 工具扩展
     "ai-plugin",
-    "ai-skill",
     "agent-plugin",
-    "agent-skill",
+    "agent-skills",
     # Swift / iOS
     "swift",
+    "swiftui",
     "ios",
     # Flutter
     "flutter",
     # Mac 工具
-    "macos-tool",
-    "mac-utility",
+    "macos-app",
+    "open-source-mac-os-apps",
 )
 
 @dataclasses.dataclass(frozen=True)
