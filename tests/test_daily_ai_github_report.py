@@ -21,10 +21,10 @@ from scripts.daily_ai_github_report import (
 class DailyAiGitHubReportTests(unittest.TestCase):
     def test_search_keywords_focus_on_ready_to_use_ai_tools(self):
         self.assertIn("mcp", AI_KEYWORDS)
-        self.assertIn("claude-code", AI_KEYWORDS)
+        self.assertIn("claude code", AI_KEYWORDS)
         self.assertIn("codex", AI_KEYWORDS)
-        self.assertIn("plugin", AI_KEYWORDS)
-        self.assertIn("skill", AI_KEYWORDS)
+        self.assertIn("ai-plugin", AI_KEYWORDS)
+        self.assertIn("agent-skills", AI_KEYWORDS)
         self.assertNotIn("llm", AI_KEYWORDS)
         self.assertNotIn("machine-learning", AI_KEYWORDS)
         self.assertNotIn("deep-learning", AI_KEYWORDS)
